@@ -41,7 +41,6 @@ def initCond(x, k, blackhole):
     return [x[0], x[1], x[2], x[3], k_t, k_r, k_th, k_phi]
 
 
-
 class Photon:
     def __init__(self, alpha, beta, freq=1.):
         '''
@@ -71,32 +70,41 @@ class Photon:
         '''
         self.iC = initCond(self.xin, self.kin, blackhole)
 
+import numpy as np
 
 def geo_integ(p, blackhole, in_edge, out_edge):
     '''
     Integrates the motion equations of the photon 
     '''
-    lmbda = linspace(0,-200,1500)
+    lmbda = np.linspace(0, -200, 1500)
     sol = odeint(blackhole.geodesics, p.iC, lmbda)
-    indx = len(sol[:,1])
-    p.fP = [0,0,0,0,0,0,0,0]
-    for i in range(indx):
-        if sol[i,1] < blackhole.EH + 1e-5: 
-            indx = i
-            break
-        elif abs(sol[i,1]*cos(sol[i,2])) < 1e-1:
-            if sol[i,1] > in_edge and sol[i,1] < out_edge:
-                indx = i
-                p.fP = sol[i]
-                break
+    p.fP = [0, 0, 0, 0, 0, 0, 0, 0]
+
+    #valid_values = ~np.isnan(sol[:,1])
+    eh_condition = (sol[:, 1] < (blackhole.EH + 1e-5))
+
+    edge_condition = (abs(sol[:, 1]*cos(sol[:, 2])) < 1e-1) &( sol[:, 1]> in_edge) & (sol[:, 1] < out_edge)
+
+    indx_eh = np.argmax(eh_condition)
+    indx_edge = np.argmax(edge_condition)
+
+    if edge_condition[indx_edge]:  
+        p.fP = sol[indx_edge]
+    elif eh_condition[indx_eh]:  
+        p.fP = [0, 0, 0, 0, 0, 0, 0, 0]
+
 
 class Image:
     '''
     Image class
     Creates the photon list and generates the image
     '''
-    def __init__(self):
-        pass
+    def __init__(self,start_alpha,start_beta, end_alpha, end_beta):
+
+        self.start_alpha = start_alpha
+        self.start_beta  = start_beta
+        self.end_alpha   = end_alpha
+        self.end_beta    = end_beta
 
     def create_photons(self, blackhole, detector):
         '''
@@ -104,17 +112,31 @@ class Image:
         '''
         self.detector = detector
         self.photon_list = []
-        i=0
-        for a in self.detector.alphaRange:
-            j = 0
-            for b in self.detector.betaRange:
+        #local_photon_list =[]
+        
+        for i in range(self.start_alpha, self.end_alpha +1):
+
+            if i == self.start_alpha:
+                beta_start = self.start_beta
+            else:
+                beta_start = 0
+
+            if i == self.end_alpha:
+                beta_end = self.end_beta
+            else:
+                beta_end = len(self.detector.betaRange)
+
+            for j in range(beta_start, beta_end):
+                a = self.detector.alphaRange[i]
+                b = self.detector.betaRange[j]
+
                 p = Photon(alpha=a, beta=b)
                 p.xin, p.kin = self.detector.photon_coords(a, b) 
                 p.i, p.j = i, j
                 p.initial_conditions(blackhole)
                 self.photon_list.append(p)
-                j += 1
-            i += 1
+
+        #self.photon_list.extend(local_photon_list)
     
     def create_image(self, blackhole, acc_structure):
         '''
@@ -125,8 +147,9 @@ class Image:
         for p in self.photon_list:
             geo_integ(p, blackhole, acc_structure.in_edge, acc_structure.out_edge)
             self.image_data[p.i, p.j] = acc_structure.spectrum(p.fP[1])
-            sys.stdout.write("\rPhoton # %d" %photon)
-            sys.stdout.flush()
+            if photon % 100 == 0 :
+                sys.stdout.write("\rPhoton # %d" %photon)
+                sys.stdout.flush()
             #print('Photon #',photon)
             photon +=1
 
